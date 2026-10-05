@@ -1,0 +1,178 @@
+---
+title: 'Assignment #4'
+author: "Roland"
+date: "2026-10-04"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE, message = FALSE, warning = FALSE)
+```
+
+Data: Retailers' Inventories to Sales Ratio (RETAILIRNSA), U.S. Census Bureau via FRED. Monthly, not seasonally adjusted, January 1992 to July 2026. Each model forecasts the next 12 months.
+
+# Part 1: Code
+
+## 1. Load the data, plot, and ACF
+
+```{r load}
+library(fpp2)
+library(TTR)
+
+RETAILIRNSA <- read.csv("RETAILIRNSA.csv")
+ts_data <- ts(RETAILIRNSA$RETAILIRNSA, start = c(1992, 1), frequency = 12)
+
+attributes(ts_data)
+plot(ts_data)
+Acf(ts_data)
+```
+
+## 2. Mean, Naive, Random Walk, and Seasonal Naive
+
+```{r simple-models}
+# Take the mean of all available history
+mean_forecast <- meanf(ts_data, 12)
+plot(mean_forecast)
+
+# Naive
+naive_forecast <- naive(ts_data, 12)
+plot(naive_forecast)
+
+# Random walk with drift
+rwf_forecast <- rwf(ts_data, 12, drift = TRUE)
+
+# Seasonal naive
+snaive_forecast <- snaive(ts_data, 12)
+```
+
+## 3. Moving Averages
+
+```{r moving-avg}
+MA5_smooth <- ma(ts_data, order = 5)
+MA9_smooth <- ma(ts_data, order = 9)
+
+plot(ts_data)
+lines(MA5_smooth, col = "red")
+lines(MA9_smooth, col = "blue")
+
+# Moving average forecast = average of the last k months, held flat
+MA5_forecast <- ts(rep(tail(SMA(ts_data, 5), 1), 12), start = c(2026, 8), frequency = 12)
+MA9_forecast <- ts(rep(tail(SMA(ts_data, 9), 1), 12), start = c(2026, 8), frequency = 12)
+MA5_forecast[1]
+MA9_forecast[1]
+```
+
+## 4. ETS
+
+```{r ets}
+ets_model <- ets(ts_data)
+ets_model
+plot(ets_model)
+ets_model$mse
+```
+
+## 5. Holt-Winters and Simple Smoothing
+
+```{r holtwinters}
+HW_model <- HoltWinters(ts_data)
+HW_model$alpha
+HW_model$beta
+HW_model$gamma
+HW_model$SSE
+plot(HW_model)
+
+SSE_Simple <- HoltWinters(ts_data, beta = FALSE, gamma = FALSE)
+SSE_Simple$alpha
+SSE_Simple$SSE
+head(SSE_Simple$fitted)
+plot(SSE_Simple)
+```
+
+## 6. Forecast the next 12 months
+
+```{r forecasts}
+ets_forecast <- forecast(ets_model, h = 12)
+HW_forecast  <- forecast(HW_model, h = 12)
+SES_forecast <- forecast(SSE_Simple, h = 12)
+
+plot(ets_forecast)
+```
+
+## 7. All forecasts in one chart
+
+```{r all-forecasts, fig.width=11, fig.height=6.5}
+plot(window(ts_data, start = c(2023, 1)), xlim = c(2023, 2027.7),
+     ylim = c(0.95, 1.75), lwd = 3,
+     main = "Actual and Model Forecasts (Aug 2026 - Jul 2027)",
+     ylab = "Inventory / Sales Ratio")
+lines(mean_forecast$mean,   col = "gray50",  lwd = 2, lty = 3)
+lines(naive_forecast$mean,  col = "red",     lwd = 2)
+lines(rwf_forecast$mean,    col = "green3",  lwd = 2, lty = 2)
+lines(snaive_forecast$mean, col = "orange",  lwd = 2)
+lines(MA5_forecast,         col = "magenta", lwd = 2, lty = 2)
+lines(MA9_forecast,         col = "blue",    lwd = 2, lty = 2)
+lines(SES_forecast$mean,    col = "purple",  lwd = 2, lty = 3)
+lines(HW_forecast$mean,     col = "brown",   lwd = 2)
+lines(ets_forecast$mean,    col = "cyan3",   lwd = 3)
+legend("top", ncol = 5, cex = 0.8, bg = "white",
+       legend = c("Actual", "Mean", "Naive", "Drift", "Seasonal naive", "MA(5)",
+                  "MA(9)", "Simple smoothing", "Holt-Winters", "ETS"),
+       col = c("black", "gray50", "red", "green3", "orange", "magenta",
+               "blue", "purple", "brown", "cyan3"),
+       lwd = c(3, 2, 2, 2, 2, 2, 2, 2, 2, 3), lty = c(1, 3, 1, 2, 1, 2, 2, 3, 1, 1))
+```
+
+## 8. Accuracy comparison (RMSE)
+
+```{r accuracy}
+results <- c(
+  "Mean"             = accuracy(mean_forecast)[1, "RMSE"],
+  "Naive"            = accuracy(naive_forecast)[1, "RMSE"],
+  "Drift"            = accuracy(rwf_forecast)[1, "RMSE"],
+  "Seasonal naive"   = accuracy(snaive_forecast)[1, "RMSE"],
+  "MA(5)"            = sqrt(mean(((ts_data - c(NA, head(SMA(ts_data, 5), -1)))[-1])^2, na.rm = TRUE)),
+  "MA(9)"            = sqrt(mean(((ts_data - c(NA, head(SMA(ts_data, 9), -1)))[-1])^2, na.rm = TRUE)),
+  "Simple smoothing" = accuracy(SES_forecast)[1, "RMSE"],
+  "Holt-Winters"     = accuracy(HW_forecast)[1, "RMSE"],
+  "ETS"              = accuracy(ets_forecast)[1, "RMSE"]
+)
+knitr::kable(data.frame(RMSE = round(sort(results), 3)),
+             caption = "RMSE of each model, best (lowest) first")
+```
+
+## Part 2: Explanation of the Results
+
+## What each model does
+
+- **Mean:** predicts the average of all history (about 1.49). This is too high, because the ratio is now about 1.22.
+
+- **Naive:** predicts the last value (1.22) for every future month.
+- **Drift:** the last value plus the average monthly change, which is a tiny decline. It goes from 1.22 to about 1.20.
+
+- **Seasonal naive:** predicts each month to be the same as that month last year.
+
+- **Moving averages:** the average of the last 5 or 9 months, held flat (1.23 and 1.27). A bigger number gives a smoother line.
+
+
+- **Simple smoothing:** a weighted average of past values, held flat (1.27). Alpha = **0.12**, so it gives little weight to the latest month. SSE = **6.36**.
+
+
+- **Holt-Winters:** tracks the level, the trend, and the seasonal pattern. Alpha = **0.53**, beta is about **0** (the trend stays steady), and gamma = **0.55**. SSE = **0.75**, much lower than simple smoothing, because it handles seasonality.
+
+
+- **ETS:** R picked **ETS(M,A,M)** automatically. That means the errors grow with the level, there is a small steady trend, and there is a seasonal pattern. Alpha = **0.663**, beta is about **0**, gamma = **0.173**, and sigma = **0.028** (a typical error of about 2.8%). The starting level is 1.62.
+
+**What the numbers mean:** 
+alpha is the weight on the latest data, beta is the weight on the trend, and gamma is the weight on the seasonal pattern. A value near 1 means that part changes quickly. A value near 0 means it changes slowly. SSE is the total squared error, and lower is better.
+
+## The one-chart comparison
+
+There are two groups. ETS, Holt-Winters, and seasonal naive rise and fall every year: a low in December, a high in January and February. All the other models are flat lines, because they cannot follow a seasonal pattern.
+
+## Accuracy comparison and best model
+
+I used **RMSE**, which is the typical size of the miss. Lower is better.
+
+**The best model is ETS, with an RMSE of about 0.040.**
+Holt-Winters is second (0.043) and seasonal naive is third (0.078). The Mean is the worst (0.184). The models that handle seasonality win, because this ratio drops every December and rises every January and February.
+
