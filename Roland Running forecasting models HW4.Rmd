@@ -1,0 +1,143 @@
+---
+title: 'Assignment #4'
+author: "Roland"
+date: "2026-10-04"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE, message = FALSE, warning = FALSE)
+```
+
+Data: Retailers' Inventories to Sales Ratio (RETAILIRNSA), U.S. Census Bureau via FRED. Monthly, not seasonally adjusted, January 1992 to July 2026. Each model forecasts the next 12 months.
+
+# Part 1: Code
+
+## 1. Load the data, plot, and ACF
+
+```{r load}
+library(fpp2)
+library(TTR)
+
+RETAILIRNSA <- read.csv("RETAILIRNSA.csv")
+ts_data <- ts(RETAILIRNSA$RETAILIRNSA, start = c(1992, 1), frequency = 12)
+
+attributes(ts_data)
+plot(ts_data)
+Acf(ts_data)
+```
+
+## 2. Mean, Naive, Random Walk, and Seasonal Naive
+
+```{r simple-models}
+# Take the mean of all available history
+mean_forecast <- meanf(ts_data, 12)
+plot(mean_forecast)
+
+# Naive
+naive_forecast <- naive(ts_data, 12)
+plot(naive_forecast)
+
+# Random walk with drift
+rwf_forecast <- rwf(ts_data, 12, drift = TRUE)
+
+# Seasonal naive
+snaive_forecast <- snaive(ts_data, 12)
+```
+
+## 3. Moving Averages
+
+```{r moving-avg}
+MA5_smooth <- ma(ts_data, order = 5)
+MA9_smooth <- ma(ts_data, order = 9)
+
+plot(ts_data)
+lines(MA5_smooth, col = "red")
+lines(MA9_smooth, col = "blue")
+
+# Moving average forecast = average of the last k months, held flat
+MA5_forecast <- ts(rep(tail(SMA(ts_data, 5), 1), 12), start = c(2026, 8), frequency = 12)
+MA9_forecast <- ts(rep(tail(SMA(ts_data, 9), 1), 12), start = c(2026, 8), frequency = 12)
+MA5_forecast[1]
+MA9_forecast[1]
+```
+
+## 4. ETS
+
+```{r ets}
+ets_model <- ets(ts_data)
+ets_model
+plot(ets_model)
+ets_model$mse
+```
+
+## 5. Holt-Winters and Simple Smoothing
+
+```{r holtwinters}
+HW_model <- HoltWinters(ts_data)
+HW_model$alpha
+HW_model$beta
+HW_model$gamma
+HW_model$SSE
+plot(HW_model)
+
+SSE_Simple <- HoltWinters(ts_data, beta = FALSE, gamma = FALSE)
+SSE_Simple$alpha
+SSE_Simple$SSE
+head(SSE_Simple$fitted)
+plot(SSE_Simple)
+```
+
+## 6. Forecast the next 12 months
+
+```{r forecasts}
+ets_forecast <- forecast(ets_model, h = 12)
+HW_forecast  <- forecast(HW_model, h = 12)
+SES_forecast <- forecast(SSE_Simple, h = 12)
+
+plot(ets_forecast)
+```
+
+## 7. All forecasts in one chart
+
+```{r all-forecasts, fig.width=11, fig.height=6.5}
+plot(window(ts_data, start = c(2023, 1)), xlim = c(2023, 2027.7),
+     ylim = c(0.95, 1.75), lwd = 3,
+     main = "Actual and Model Forecasts (Aug 2026 - Jul 2027)",
+     ylab = "Inventory / Sales Ratio")
+lines(mean_forecast$mean,   col = "gray50",  lwd = 2, lty = 3)
+lines(naive_forecast$mean,  col = "red",     lwd = 2)
+lines(rwf_forecast$mean,    col = "green3",  lwd = 2, lty = 2)
+lines(snaive_forecast$mean, col = "orange",  lwd = 2)
+lines(MA5_forecast,         col = "magenta", lwd = 2, lty = 2)
+lines(MA9_forecast,         col = "blue",    lwd = 2, lty = 2)
+lines(SES_forecast$mean,    col = "purple",  lwd = 2, lty = 3)
+lines(HW_forecast$mean,     col = "brown",   lwd = 2)
+lines(ets_forecast$mean,    col = "cyan3",   lwd = 3)
+legend("top", ncol = 5, cex = 0.8, bg = "white",
+       legend = c("Actual", "Mean", "Naive", "Drift", "Seasonal naive", "MA(5)",
+                  "MA(9)", "Simple smoothing", "Holt-Winters", "ETS"),
+       col = c("black", "gray50", "red", "green3", "orange", "magenta",
+               "blue", "purple", "brown", "cyan3"),
+       lwd = c(3, 2, 2, 2, 2, 2, 2, 2, 2, 3), lty = c(1, 3, 1, 2, 1, 2, 2, 3, 1, 1))
+```
+
+## 8. Accuracy comparison (RMSE)
+
+```{r accuracy}
+results <- c(
+  "Mean"             = accuracy(mean_forecast)[1, "RMSE"],
+  "Naive"            = accuracy(naive_forecast)[1, "RMSE"],
+  "Drift"            = accuracy(rwf_forecast)[1, "RMSE"],
+  "Seasonal naive"   = accuracy(snaive_forecast)[1, "RMSE"],
+  "MA(5)"            = sqrt(mean(((ts_data - c(NA, head(SMA(ts_data, 5), -1)))[-1])^2, na.rm = TRUE)),
+  "MA(9)"            = sqrt(mean(((ts_data - c(NA, head(SMA(ts_data, 9), -1)))[-1])^2, na.rm = TRUE)),
+  "Simple smoothing" = accuracy(SES_forecast)[1, "RMSE"],
+  "Holt-Winters"     = accuracy(HW_forecast)[1, "RMSE"],
+  "ETS"              = accuracy(ets_forecast)[1, "RMSE"]
+)
+knitr::kable(data.frame(RMSE = round(sort(results), 3)),
+             caption = "RMSE of each model, best (lowest) first")
+```
+
+
